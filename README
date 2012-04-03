@@ -1,13 +1,7 @@
 # pong
 
-FIXME: write description
+This is a really basic game written in clojure. Mainly practice for me so that I can become familiar with clojure and also work up to creating a decent sized game.
 
 ## Usage
 
-FIXME: write
-
-## License
-
-Copyright (C) 2012 FIXME
-
-Distributed under the Eclipse Public License, the same as Clojure.
+Using leiningen fork the repo. Under the root pong directory do `lein repl` and once the repl loads `(game)` will run the pong game.
