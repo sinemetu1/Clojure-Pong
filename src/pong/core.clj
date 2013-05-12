@@ -1,6 +1,7 @@
 (ns pong.core
   (:import (java.awt Color Dimension)
-           (javax.swing JPanel JFrame Timer JOptionPane)
+           (javax.swing JPanel JFrame JOptionPane)
+           (java.util Timer TimerTask)
            (java.awt.event ActionListener KeyListener))
   (:use clojure.contrib.import-static)
   (:gen-class))
@@ -23,9 +24,9 @@
             VK_RIGHT [4 0]
            })
 
-(defn point-to-screen-rect [pt]
-  (map #(* point-size %)
-       [(pt 0) (pt 1) 1 1]))
+;(defn point-to-screen-rect [pt]
+  ;(map #(* point-size %)
+       ;[(pt 0) (pt 1) 1 1]))
 
 (defn point-to-screen-round-rect [pt
                                   width
@@ -60,6 +61,12 @@
    :dir [1/2 1/2]
    :color (Color. 50 50 50)
    :type :ball})
+
+;; apply once for x and once for y
+;; final time = (sqrt (+ (pow x 2) (pow y 2))) / .5f
+;(defn interpolate
+  ;[intial final progress] ;; progress = current-time / final-time
+  ;(* (+ init (- final intial)) progress))
 
 (defn add-points [& pts]
   (vec (apply map + pts)))
@@ -189,6 +196,33 @@
     (keyReleased [e])
     (keyTyped [e])))
 
+(defn- non-controlled-updates
+  [ai user ball]
+  (update-ball ai user ball)
+  (update-ai ai ball))
+
+(defn my-run
+  [user ai ball frame panel]
+  (if running
+    (do
+      (non-controlled-updates ai user ball)
+
+      (when (lose? @ball)
+        (def running false)
+        (JOptionPane/showMessageDialog frame "You Lose :("))
+
+      (when (win? @ball)
+        (def running false)
+        (JOptionPane/showMessageDialog frame "You Win! :D"))
+
+      (.repaint panel))))
+
+(defn game-loop
+  [user ai ball frame panel]
+  (let [ttask (proxy [TimerTask] [] (run [] (my-run user ai ball frame panel)))]
+    (doto (Timer.)
+      (.schedule ttask (long 0) (long (/ 1000 60))))))
+
 (defn game []
   (let [user (ref (create-user-paddle))
         ai   (ref (create-ai-paddle))
@@ -203,21 +237,7 @@
       (.add panel)
       (.pack)
       (.setVisible true))
-    (loop []
-      (if running
-        (do
-          (update-ball ai user ball)
-          (update-ai ai ball)
-          (when (lose? @ball)
-            (def running false)
-            (JOptionPane/showMessageDialog frame "You Lose :("))
-          (when (win? @ball)
-            (def running false)
-            (JOptionPane/showMessageDialog frame "You Win! :D"))
-          (.repaint panel)))
-          (. Thread sleep turn-millis)
-      (recur))
-    [ai user ball]))
+    (game-loop user ai ball frame panel)))
 
 (defn -main [& args]
   (game))
