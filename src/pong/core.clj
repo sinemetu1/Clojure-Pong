@@ -37,7 +37,7 @@
 (defn create-user-paddle []
   {:location [32 48]
    :width 7
-   :height 2
+   :height 1
    :dir [0 0]
    :color (Color. 210 50 90)
    :type :paddle})
@@ -82,12 +82,11 @@
 
 (defmethod move :paddle
   [{:keys [location final curr step] :as paddle} dir]
-  (let [[x y]     (if (nil? dir)
+  (let [beforex   (get location 0)
+        [vx vy]   dir
+        [x  y]    (if (nil? dir)
                     location
                     (add-points location dir))
-        ;_ (println "x" x "y" y)
-        beforex   (get location 0)
-        [vx vy]   dir
         new-final (get-final final (+ x (:width paddle)) width vx x y)
         finalx    (get new-final 0)
         a-step    (get-step step beforex finalx)
@@ -155,9 +154,9 @@
       (if (< vy 0)
         (cond
           ; ball is to the left of the ai paddle
-          (< bx ax) (alter ai move [-1 0])
+          (< bx ax) (alter ai move [-4 0])
           ; ball is to the right of the ai paddle
-          (> bx (+ ax (:width @ai))) (alter ai move [1 0]))))))
+          (> bx (+ ax (:width @ai))) (alter ai move [4 0]))))))
 
 (defn update-direction [user newdir]
   (when (or newdir
@@ -170,6 +169,11 @@
     (ref-set user (create-user-paddle))
     (ref-set ai (create-ai-paddle))
     (ref-set ball (create-ball))))
+
+(defn- dissoc-paddle
+  [paddle]
+  (dosync
+    (alter paddle #(dissoc % :final :step :curr))))
 
 ; END FUNCTIONAL AREA
 
@@ -214,33 +218,32 @@
     (keyReleased [e])
     (keyTyped [e])))
 
-(defn- dissoc-user
-  [user]
-  (dosync
-    (alter user #(dissoc % :final :step :curr))))
-
 (defn- do-interpolate
-  [user]
-  (let [curr (:curr @user)
-        step (:step @user)
-        final (:final @user)]
-    (println "user" @user)
+  [paddle]
+  (let [curr (:curr @paddle)
+        step (:step @paddle)
+        final (:final @paddle)]
     (cond
       (neg? step) (cond
-                    (< curr final)  (dissoc-user user)
-                    (>= curr final) (update-direction user nil))
+                    (< curr final)  (dissoc-paddle paddle)
+                    (>= curr final) (update-direction paddle nil))
       (pos? step) (cond
-                    (> curr final)  (dissoc-user user)
-                    (<= curr final) (update-direction user nil)))))
+                    (> curr final)  (dissoc-paddle paddle)
+                    (<= curr final) (update-direction paddle nil)))))
 
 (defn- non-controlled-updates
   [ai user ball]
   (update-ball ai user ball)
   (update-ai ai ball)
+  ;; handle interpolation for ai paddle
+  (cond
+    (nil? (:step @ai))       nil
+    (not (nil? (:step @ai))) (do-interpolate ai))
+
+  ;; handle interpolation for user paddle
   (cond
     (nil? (:step @user))       nil
-    (not (nil? (:step @user))) (do-interpolate user))
-  (println "here"))
+    (not (nil? (:step @user))) (do-interpolate user)))
 
 (defn my-run
   [user ai ball frame panel]
