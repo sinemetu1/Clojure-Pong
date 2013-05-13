@@ -17,20 +17,14 @@
 (def running false)
 (def width 75)
 (def height 50)
+(def fps 60)
 (def point-size 10)
-(def turn-millis 20)
 (def collision-multiplier 1.1)
 (def dirs { VK_LEFT  [-4 0]
-            VK_RIGHT [4 0]
-           })
+            VK_RIGHT [4 0]})
 
-;(defn point-to-screen-rect [pt]
-  ;(map #(* point-size %)
-       ;[(pt 0) (pt 1) 1 1]))
-
-(defn point-to-screen-round-rect [pt
-                                  width
-                                  height]
+(defn point-to-screen-round-rect
+  [pt width height]
   (map #(* point-size %)
        [(pt 0) ; x
         (pt 1) ; y
@@ -43,7 +37,7 @@
 (defn create-user-paddle []
   {:location [32 48]
    :width 7
-   :height 1
+   :height 2
    :dir [0 0]
    :color (Color. 210 50 90)
    :type :paddle})
@@ -62,28 +56,55 @@
    :color (Color. 50 50 50)
    :type :ball})
 
-;; apply once for x and once for y
-;; final time = (sqrt (+ (pow x 2) (pow y 2))) / .5f
-;(defn interpolate
-  ;[intial final progress] ;; progress = current-time / final-time
-  ;(* (+ init (- final intial)) progress))
+(defn get-progress
+  [{:keys [start end]}]
+  (/ (System/currentTimeMillis) end))
+
+(defn get-step
+  [step initial final]
+  (if step
+    step
+    (/ (- final initial) (/ fps 10))))
 
 (defn add-points [& pts]
   (vec (apply map + pts)))
 
 (defmulti move (fn [object & direction] (:type object)))
 
-(defmethod move :paddle [{:keys [location] :as paddle} dir] 
-  (let [[x y] (add-points location dir)
-        right (+ x (:width paddle))
-        [vx vy] dir]
-    (if (and (<= x 0) (<= vx 0))
-      (assoc paddle :location [0 y])
-      (if (and (>= right width) (>= vx 0))
-        (assoc paddle :location [width y])
-        (assoc paddle :location [x y])))))
+(defn- get-final
+  [final right width vx x y]
+  (if-not final
+    (cond
+      (and (<= x 0) (<= vx 0))         [0 y]
+      (and (>= right width) (>= vx 0)) [width y]
+      :else                            [x y])
+    [final y]))
 
-(defmethod move :ball [{:keys [location dir] :as ball}] 
+(defmethod move :paddle
+  [{:keys [location final curr step] :as paddle} dir]
+  (let [[x y]     (if (nil? dir)
+                    location
+                    (add-points location dir))
+        ;_ (println "x" x "y" y)
+        beforex   (get location 0)
+        [vx vy]   dir
+        new-final (get-final final (+ x (:width paddle)) width vx x y)
+        finalx    (get new-final 0)
+        a-step    (get-step step beforex finalx)
+        new-curr  (+ beforex a-step)]
+
+    ;(if (= (:height paddle) 2)
+      ;(do
+        ;(println "beforex" beforex "finalx" finalx "step" a-step)))
+
+    (assoc paddle
+           :location [new-curr y]
+           :step     a-step
+           :curr     new-curr
+           :final    finalx)))
+
+(defmethod move :ball
+  [{:keys [location dir] :as ball}]
   (let [[x y] (add-points location dir)
         [vx vy] dir]
       (if (<= x 0)
@@ -110,10 +131,7 @@
       (and (and (>= bx x) (<= bx topRight))
            (>= by y)) 
       (and (and (>= bx x) (<= bx topRight))
-           (<= by (+ y height)))
-      )
-    )
-  )
+           (<= by (+ y height))))))
 
 (defn handle-collission [{:keys [location dir] :as ball}]
   (let [[vx vy] dir]
@@ -126,7 +144,7 @@
     (let [[vx vy] (:dir @ball)]
       (if (or (collision? @ai @ball)
               (collision? @user @ball true))
-        (alter ball handle-collission) 
+        (alter ball handle-collission)
         (alter ball move)))))
 
 (defn update-ai [ai ball]
@@ -139,11 +157,11 @@
           ; ball is to the left of the ai paddle
           (< bx ax) (alter ai move [-1 0])
           ; ball is to the right of the ai paddle
-          (> bx (+ ax (:width @ai))) (alter ai move [1 0])
-          )))))
+          (> bx (+ ax (:width @ai))) (alter ai move [1 0]))))))
 
 (defn update-direction [user newdir]
-  (when newdir
+  (when (or newdir
+            (:step @user))
     (dosync
       (alter user move newdir))))
 
@@ -196,10 +214,33 @@
     (keyReleased [e])
     (keyTyped [e])))
 
+(defn- dissoc-user
+  [user]
+  (dosync
+    (alter user #(dissoc % :final :step :curr))))
+
+(defn- do-interpolate
+  [user]
+  (let [curr (:curr @user)
+        step (:step @user)
+        final (:final @user)]
+    (println "user" @user)
+    (cond
+      (neg? step) (cond
+                    (< curr final)  (dissoc-user user)
+                    (>= curr final) (update-direction user nil))
+      (pos? step) (cond
+                    (> curr final)  (dissoc-user user)
+                    (<= curr final) (update-direction user nil)))))
+
 (defn- non-controlled-updates
   [ai user ball]
   (update-ball ai user ball)
-  (update-ai ai ball))
+  (update-ai ai ball)
+  (cond
+    (nil? (:step @user))       nil
+    (not (nil? (:step @user))) (do-interpolate user))
+  (println "here"))
 
 (defn my-run
   [user ai ball frame panel]
@@ -221,7 +262,7 @@
   [user ai ball frame panel]
   (let [ttask (proxy [TimerTask] [] (run [] (my-run user ai ball frame panel)))]
     (doto (Timer.)
-      (.schedule ttask (long 0) (long (/ 1000 60))))))
+      (.schedule ttask (long 0) (long (/ 1000 fps))))))
 
 (defn game []
   (let [user (ref (create-user-paddle))
